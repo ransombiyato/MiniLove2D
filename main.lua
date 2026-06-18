@@ -1,9 +1,9 @@
 -- minilove2d by ribi
--- a tiny love2d editor/sandbox thing
--- if you find bugs lmk in discord i guess
--- also come say hi, i'm pretty cool
+-- a tiny love2d editor/sandbox
+-- bugs? discord me lol
+-- come say hi im cool
 
-Editor = {
+local Editor = {
     currentTab = "code",
     lines = {
         "-- welcome to minilove2d by ribi(me), made to make people's life easier",
@@ -73,21 +73,19 @@ Editor = {
     sandboxCallbacks = { load = nil, update = nil, draw = nil, textinput = nil, keypressed = nil }
 }
 
-luaKeywords = {["function"]=true, ["end"]=true, ["if"]=true, ["then"]=true, ["else"]=true, ["elseif"]=true, ["for"]=true, ["while"]=true, ["return"]=true, ["local"]=true, ["break"]=true, ["true"]=true, ["false"]=true, ["nil"]=true}
-loveKeywords = {["love"]=true, ["graphics"]=true, ["draw"]=true, ["update"]=true, ["load"]=true, ["print"]=true, ["circle"]=true, ["rectangle"]=true, ["setColor"]=true, ["clear"]=true}
+local luaKeywords = {["function"]=true, ["end"]=true, ["if"]=true, ["then"]=true, ["else"]=true, ["elseif"]=true, ["for"]=true, ["while"]=true, ["return"]=true, ["local"]=true, ["break"]=true, ["true"]=true, ["false"]=true, ["nil"]=true}
+local loveKeywords = {["love"]=true, ["graphics"]=true, ["draw"]=true, ["update"]=true, ["load"]=true, ["print"]=true, ["circle"]=true, ["rectangle"]=true, ["setColor"]=true, ["clear"]=true}
+
+local History = { undoStack = {}, redoStack = {} }
 
 function Editor.log(msg, isError)
     table.insert(Editor.consoleLogs, {text = tostring(msg), isError = isError or false})
-    -- clear old logs so we don't explode memory
     if #Editor.consoleLogs > 100 then 
         table.remove(Editor.consoleLogs, 1) 
     end
 end
 
-History = { undoStack = {}, redoStack = {} }
-
 function Editor.saveState()
-    -- snapshot the current state for undo
     local snapshot = {}
     for i, v in ipairs(Editor.lines) do 
         snapshot[i] = v 
@@ -106,21 +104,14 @@ function Editor.saveState()
 end
 
 function Editor.undo()
-    if #History.undoStack == 0 then 
-        return 
-    end
+    if #History.undoStack == 0 then return end
     
-    -- save current state to redo stack
     local snapshot = {}
     for i, v in ipairs(Editor.lines) do 
         snapshot[i] = v 
     end
     
-    table.insert(History.redoStack, {
-        lines = snapshot, 
-        cx = Editor.cursorX, 
-        cy = Editor.cursorY
-    })
+    table.insert(History.redoStack, {lines = snapshot, cx = Editor.cursorX, cy = Editor.cursorY})
     
     local prev = table.remove(History.undoStack)
     Editor.lines = prev.lines
@@ -129,26 +120,19 @@ function Editor.undo()
 end
 
 function Editor.redo()
-    if #History.redoStack == 0 then 
-        return 
-    end
+    if #History.redoStack == 0 then return end
     
-    -- move current to undo
     local snapshot = {}
     for i, v in ipairs(Editor.lines) do 
         snapshot[i] = v 
     end
     
-    table.insert(History.undoStack, {
-        lines = snapshot, 
-        cx = Editor.cursorX, 
-        cy = Editor.cursorY
-    })
+    table.insert(History.undoStack, {lines = snapshot, cx = Editor.cursorX, cy = Editor.cursorY})
     
-    local nextState = table.remove(History.redoStack)
-    Editor.lines = nextState.lines
-    Editor.cursorX = nextState.cx
-    Editor.cursorY = nextState.cy
+    local next = table.remove(History.redoStack)
+    Editor.lines = next.lines
+    Editor.cursorX = next.cx
+    Editor.cursorY = next.cy
 end
 
 function Editor.exportCode()
@@ -157,56 +141,49 @@ function Editor.exportCode()
     end
     
     local files = love.filesystem.getDirectoryItems("saves")
-    local newFileName = "saves/project_" .. (#files + 1) .. ".lua"
-    local fullText = table.concat(Editor.lines, "\n")
+    local name = "saves/project_" .. (#files + 1) .. ".lua"
+    local code = table.concat(Editor.lines, "\n")
     
-    local success, err = love.filesystem.write(newFileName, fullText)
-    if success then
-        Editor.log("Exported: " .. newFileName)
+    if love.filesystem.write(name, code) then
+        Editor.log("Exported: " .. name)
     else
-        Editor.log("Export error: " .. tostring(err), true)
+        Editor.log("Export failed", true)
     end
     
-    -- also write to main save file
-    love.filesystem.write("saved_code.lua", fullText)
+    love.filesystem.write("saved_code.lua", code)
 end
 
 function Editor.importCode()
     if not love.filesystem.getInfo("saved_code.lua") then 
-        Editor.log("No saved file found.", true) 
+        Editor.log("No saved file.", true) 
         return 
     end
     
     local content = love.filesystem.read("saved_code.lua")
     if content then
         Editor.lines = {}
-        -- split by lines (handle different line endings)
         for line in string.gmatch(content .. "\n", "(.-)\r?\n") do 
             table.insert(Editor.lines, line) 
         end
         
         Editor.cursorX = 1
         Editor.cursorY = 1
-        Editor.log("Code imported successfully.", false)
+        Editor.log("Imported!", false)
     end
 end
 
 function Editor.scanLocals()
-    -- look through all lines and find local vars + functions
     Editor.localSymbols = {}
 
     for _, line in ipairs(Editor.lines) do
-        -- match: local foo
         for var in line:gmatch("local%s+([%w_]+)") do
             Editor.localSymbols[var] = true
         end
 
-        -- match: local function foo()
         for func in line:gmatch("local%s+function%s+([%w_]+)") do
             Editor.localSymbols[func] = true
         end
 
-        -- match: function foo()
         for func in line:gmatch("function%s+([%w_%.:]+)") do
             local name = func:match("([%w_]+)$")
             if name then
@@ -216,94 +193,99 @@ function Editor.scanLocals()
     end
 end
 
+local function fuzzyMatch(word, cand)
+    local i = 1
+    for c in cand:gmatch(".") do
+        if c:lower() == word:sub(i,i):lower() then
+            i = i + 1
+        end
+        if i > #word then return true end
+    end
+    return false
+end
+
 function Editor.updateAutocomplete()
-    local currentLine = Editor.lines[Editor.cursorY] or ""
-    local textBeforeCursor = currentLine:sub(1, Editor.cursorX - 1)
-    local lastWord = textBeforeCursor:match("([%a_][%w_%.%:]*)$")
+    local line = Editor.lines[Editor.cursorY] or ""
+    local before = line:sub(1, Editor.cursorX - 1)
+    local word = before:match("([%a_][%w_%.%:]*)$")
     
-    if not lastWord or lastWord == "" then 
+    if not word or word == "" then 
         Editor.suggestActive = false
         return 
     end
     
-    -- if it has a dot, just get the part after it
-    if lastWord:find("%.") then 
-        lastWord = lastWord:match("([^%.]+)$") or "" 
+    if word:find("%.") then 
+        word = word:match("([^%.]+)$") or "" 
     end
     
-    if lastWord == "" then 
+    if word == "" then 
         Editor.suggestActive = false
         return 
     end
     
-    local suggestions = {}
-    local queryLower = lastWord:lower()
+    Editor.scanLocals()
+
+    local prefix = {}
+    local fuzzy = {}
+    local lower = word:lower()
     
-    -- check built-in keywords
-    for _, keyword in ipairs(Editor.keywords) do
-        if keyword:lower():sub(1, #queryLower) == queryLower and keyword ~= lastWord then
-            table.insert(suggestions, keyword)
+    for name in pairs(Editor.localSymbols or {}) do
+        local ln = name:lower()
+        if ln ~= lower and ln:find("^" .. lower) then
+            table.insert(prefix, name)
         end
     end
-    
-    -- check local symbols
-    for symbol, _ in pairs(Editor.localSymbols or {}) do
-        if symbol:lower():sub(1, #queryLower) == queryLower and symbol ~= lastWord then
-            table.insert(suggestions, symbol)
+
+    for _, kw in ipairs(Editor.keywords) do
+        local lkw = kw:lower()
+        if lkw ~= lower then
+            if lkw:find("^" .. lower) then
+                table.insert(prefix, kw)
+            elseif fuzzyMatch(word, kw) then
+                table.insert(fuzzy, kw)
+            end
         end
     end
-    
-    if #suggestions > 0 then
-        Editor.suggestions = suggestions
-        Editor.suggestActive = true
-        Editor.suggestIndex = math.min(Editor.suggestIndex, #suggestions)
-    else
-        Editor.suggestActive = false
-    end
+
+    Editor.suggestions = #prefix > 0 and prefix or fuzzy
+    Editor.suggestActive = #Editor.suggestions > 0
+    Editor.suggestIndex = 1
 end
 
 function Editor.acceptSuggestion()
-    if not Editor.suggestActive or #Editor.suggestions == 0 then 
-        return 
-    end
+    if not Editor.suggestActive or #Editor.suggestions == 0 then return end
     
-    local currentLine = Editor.lines[Editor.cursorY]
-    local textBeforeCursor = currentLine:sub(1, Editor.cursorX - 1)
-    local textAfterCursor = currentLine:sub(Editor.cursorX)
-    local lastWord = textBeforeCursor:match("([%a_][%w_]*)$") or ""
-    local prefix = textBeforeCursor:sub(1, #textBeforeCursor - #lastWord)
+    local line = Editor.lines[Editor.cursorY]
+    local before = line:sub(1, Editor.cursorX - 1)
+    local after = line:sub(Editor.cursorX)
+    local word = before:match("([%a_][%w_]*)$") or ""
+    local pre = before:sub(1, #before - #word)
     local chosen = Editor.suggestions[Editor.suggestIndex]
     
-    Editor.lines[Editor.cursorY] = prefix .. chosen .. textAfterCursor
-    Editor.cursorX = #prefix + #chosen + 1
+    Editor.lines[Editor.cursorY] = pre .. chosen .. after
+    Editor.cursorX = #pre + #chosen + 1
     Editor.suggestActive = false
 end
 
 function Editor.runSandbox()
-    -- reset everything before running
-    Debug.log = {}
     Editor.consoleLogs = {}
-
     Editor.sandboxActive = false
-    Editor.sandboxError = nil
 
     for k in pairs(Editor.sandboxCallbacks) do 
         Editor.sandboxCallbacks[k] = nil 
     end
 
-    -- create sandbox env
     local env = {}
     for k, v in pairs(_G) do 
         env[k] = v 
     end
 
-    -- override print so it goes to console
     env.print = function(...)
-        local output = {}
+        local args = {}
         for i = 1, select("#", ...) do 
-            table.insert(output, tostring(select(i, ...))) 
+            table.insert(args, tostring(select(i, ...))) 
         end
-        Editor.log(table.concat(output, "	"), false)
+        Editor.log(table.concat(args, "\t"), false)
     end
 
     env.love = {}
@@ -311,7 +293,8 @@ function Editor.runSandbox()
         env.love[k] = v 
     end
 
-    local chunk, err = load(table.concat(Editor.lines, "\n"), "Sandbox", "t", env)
+    local code = table.concat(Editor.lines, "\n")
+    local chunk, err = load(code, "Sandbox", "t", env)
 
     if not chunk then 
         Editor.log("Compile Error: " .. err, true)
@@ -326,7 +309,6 @@ function Editor.runSandbox()
         return 
     end
 
-    -- grab the callbacks the user defined
     for _, hook in ipairs({"load", "update", "draw", "textinput", "keypressed"}) do
         if env.love and type(env.love[hook]) == "function" then 
             Editor.sandboxCallbacks[hook] = env.love[hook] 
@@ -335,7 +317,6 @@ function Editor.runSandbox()
 
     Editor.sandboxActive = true
 
-    -- call load if they defined it
     if Editor.sandboxCallbacks.load then
         local ok2, err2 = pcall(Editor.sandboxCallbacks.load)
         if not ok2 then
@@ -343,7 +324,6 @@ function Editor.runSandbox()
         end
     end
 end
-    
 
 function love.load()
     Editor.font = love.graphics.newFont(Editor.fontSize)
@@ -355,7 +335,6 @@ function love.load()
 end
 
 function love.update(dt)
-    -- smooth scrolling
     Editor.scrollY = Editor.scrollY + (Editor.targetScrollY - Editor.scrollY) * 18 * dt
     Editor.scrollX = Editor.scrollX + (Editor.targetScrollX - Editor.scrollX) * 18 * dt
     Editor.cursorTimer = (Editor.cursorTimer + dt) % 1.0
@@ -364,114 +343,94 @@ function love.update(dt)
         Editor.ignoreTextInputTimer = Editor.ignoreTextInputTimer - dt 
     end
     
-    -- autosave every 2 mins or so
     Editor.autosaveTimer = Editor.autosaveTimer + dt
     if Editor.autosaveTimer >= Editor.autosaveInterval then
         Editor.autosaveTimer = 0
         love.filesystem.write("backup_code.lua", table.concat(Editor.lines, "\n"))
     end
     
-    -- update sandbox if game tab is active
     if Editor.sandboxActive and Editor.currentTab == "game" and Editor.sandboxCallbacks.update then 
         pcall(Editor.sandboxCallbacks.update, dt) 
     end
 end
 
-local function parseAndDrawLine(line, startX, startY)
-    -- syntax highlighting colors
-    local kwColor = {0.77, 0.52, 0.75, 1}
-    local apiColor = {0.31, 0.76, 1, 1}
-    local stringColor = {0.81, 0.57, 0.47, 1}
-    local numberColor = {0.71, 0.81, 0.66, 1}
-    local commentColor = {0.41, 0.6, 0.33, 1}
-    local textColor = {0.84, 0.84, 0.84, 1}
-    local symbolColor = {0.65, 0.65, 0.65, 1}
+local function drawLine(line, x, y)
+    local kw = {0.77, 0.52, 0.75, 1}
+    local api = {0.31, 0.76, 1, 1}
+    local str = {0.81, 0.57, 0.47, 1}
+    local num = {0.71, 0.81, 0.66, 1}
+    local cmt = {0.41, 0.6, 0.33, 1}
+    local txt = {0.84, 0.84, 0.84, 1}
+    local sym = {0.65, 0.65, 0.65, 1}
     
-    -- if it's a full line comment, just highlight it all
     if line:match("^%s*%-%-") then 
-        love.graphics.setColor(commentColor)
-        love.graphics.print(line, startX, startY)
+        love.graphics.setColor(cmt)
+        love.graphics.print(line, x, y)
         return 
     end
     
     local i = 1
     local len = #line
-    local curX = startX
+    local cx = x
     
     while i <= len do
-        local char = line:sub(i, i)
+        local c = line:sub(i, i)
         
-        -- inline comment
-        if char == "-" and line:sub(i + 1, i + 1) == "-" then
-            love.graphics.setColor(commentColor)
-            love.graphics.print(line:sub(i), curX, startY)
+        if c == "-" and line:sub(i + 1, i + 1) == "-" then
+            love.graphics.setColor(cmt)
+            love.graphics.print(line:sub(i), cx, y)
             break
-        -- strings
-        elseif char == '"' or char == "'" then
-            local quote = char
-            local startPos = i
+        elseif c == '"' or c == "'" then
+            local q = c
+            local start = i
             i = i + 1
+            while i <= len and line:sub(i, i) ~= q do i = i + 1 end
             
-            while i <= len and line:sub(i, i) ~= quote do 
-                i = i + 1 
-            end
-            
-            local text = line:sub(startPos, i)
-            love.graphics.setColor(stringColor)
-            love.graphics.print(text, curX, startY)
-            curX = curX + Editor.font:getWidth(text)
+            local text = line:sub(start, i)
+            love.graphics.setColor(str)
+            love.graphics.print(text, cx, y)
+            cx = cx + Editor.font:getWidth(text)
             i = i + 1
-        -- numbers
-        elseif char:match("%d") then
-            local startPos = i
+        elseif c:match("%d") then
+            local start = i
+            while i <= len and line:sub(i, i):match("[%d%.]") do i = i + 1 end
             
-            while i <= len and line:sub(i, i):match("[%d%.]") do 
-                i = i + 1 
-            end
+            local text = line:sub(start, i - 1)
+            love.graphics.setColor(num)
+            love.graphics.print(text, cx, y)
+            cx = cx + Editor.font:getWidth(text)
+        elseif c:match("[%a_]") then
+            local start = i
+            while i <= len and line:sub(i, i):match("[%w_]") do i = i + 1 end
             
-            local text = line:sub(startPos, i - 1)
-            love.graphics.setColor(numberColor)
-            love.graphics.print(text, curX, startY)
-            curX = curX + Editor.font:getWidth(text)
-        -- identifiers / keywords
-        elseif char:match("[%a_]") then
-            local startPos = i
-            
-            while i <= len and line:sub(i, i):match("[%w_]") do 
-                i = i + 1 
-            end
-            
-            local text = line:sub(startPos, i - 1)
+            local text = line:sub(start, i - 1)
             
             if luaKeywords[text] then 
-                love.graphics.setColor(kwColor) 
+                love.graphics.setColor(kw) 
             elseif loveKeywords[text] then 
-                love.graphics.setColor(apiColor) 
+                love.graphics.setColor(api) 
             else 
-                love.graphics.setColor(textColor) 
+                love.graphics.setColor(txt) 
             end
             
-            love.graphics.print(text, curX, startY)
-            curX = curX + Editor.font:getWidth(text)
-        -- everything else
+            love.graphics.print(text, cx, y)
+            cx = cx + Editor.font:getWidth(text)
         else
-            if char:match("[%+%-%*%/%=<>~&|%.%(%)%{%}%[%],;]") then 
-                love.graphics.setColor(symbolColor) 
+            if c:match("[%+%-%*%/%=<>~&|%.%(%)%{%}%[%],;]") then 
+                love.graphics.setColor(sym) 
             else 
-                love.graphics.setColor(textColor) 
+                love.graphics.setColor(txt) 
             end
             
-            love.graphics.print(char, curX, startY)
-            curX = curX + Editor.font:getWidth(char)
+            love.graphics.print(c, cx, y)
+            cx = cx + Editor.font:getWidth(c)
             i = i + 1
         end
     end
 end
 
 function love.textinput(t)
-    if Editor.currentTab ~= "code" or Editor.ignoreTextInputTimer > 0 then 
-        return 
-    end
+    if Editor.currentTab ~= "code" or Editor.ignoreTextInputTimer > 0 then return end
     
     Editor.saveState()
     Editor.cursorTimer = 0
@@ -480,20 +439,12 @@ function love.textinput(t)
     local before = line:sub(1, Editor.cursorX - 1)
     local after = line:sub(Editor.cursorX)
     
-    -- auto-pair brackets
-    local pairsMap = {
-        ["("] = ")",
-        ["["] = "]",
-        ["{"] = "}",
-        ['"'] = '"',
-        ["'"] = "'"
-    }
+    local pairs = {["("] = ")", ["["] = "]", ["{"] = "}", ['"'] = '"', ["'"] = "'"}
     
-    if pairsMap[t] then
-        Editor.lines[Editor.cursorY] = before .. t .. pairsMap[t] .. after
+    if pairs[t] then
+        Editor.lines[Editor.cursorY] = before .. t .. pairs[t] .. after
         Editor.cursorX = Editor.cursorX + 1
     elseif (t == ")" or t == "]" or t == "}" or t == '"' or t == "'") and after:sub(1, 1) == t then
-        -- skip closing bracket if one's already there
         Editor.cursorX = Editor.cursorX + 1
     else
         Editor.lines[Editor.cursorY] = before .. t .. after
@@ -503,14 +454,17 @@ function love.textinput(t)
     Editor.updateAutocomplete()
 end
 
+local function killSuggest()
+    Editor.suggestActive = false
+    Editor.suggestions = {}
+    Editor.suggestIndex = 1
+end
+
 function love.keypressed(key)
-    if Editor.currentTab ~= "code" then 
-        return 
-    end
+    if Editor.currentTab ~= "code" then return end
     
     Editor.cursorTimer = 0
     
-    -- handle autocomplete menu
     if Editor.suggestActive then
         if key == "return" then
             Editor.acceptSuggestion()
@@ -537,7 +491,6 @@ function love.keypressed(key)
             local after = line:sub(Editor.cursorX)
             local pair = before:sub(-1) .. after:sub(1, 1)
 
-            -- delete matched pair
             if pair == "()" or pair == "[]" or pair == "{}" or pair == '""' or pair == "''" then
                 Editor.lines[Editor.cursorY] = before:sub(1, -2) .. after:sub(2)
             else
@@ -547,7 +500,6 @@ function love.keypressed(key)
             Editor.cursorX = Editor.cursorX - 1
 
         elseif Editor.cursorY > 1 then
-            -- merge with previous line
             Editor.cursorX = #Editor.lines[Editor.cursorY - 1] + 1
             Editor.lines[Editor.cursorY - 1] = Editor.lines[Editor.cursorY - 1] .. line
             table.remove(Editor.lines, Editor.cursorY)
@@ -557,11 +509,10 @@ function love.keypressed(key)
     elseif key == "return" then
         local before = line:sub(1, Editor.cursorX - 1)
         local after = line:sub(Editor.cursorX)
-        local spaces = before:match("^(%s*)") or ""
+        local indent = before:match("^(%s*)") or ""
         local trimmed = before:gsub("%s+$", "")
 
-        -- check if this line opens a block
-        local opensBlock =
+        local needsEnd =
             trimmed:match("^%s*function[%s%(]") or
             trimmed:match("^%s*if.+then$") or
             trimmed:match("^%s*for.+do$") or
@@ -569,79 +520,67 @@ function love.keypressed(key)
             trimmed:match("^%s*repeat$") or
             trimmed:match("^%s*do$")
 
-        if opensBlock then
-            -- insert auto-indented block
+        if needsEnd then
             Editor.lines[Editor.cursorY] = before
-            table.insert(Editor.lines, Editor.cursorY + 1, spaces .. "    ")
-            table.insert(Editor.lines, Editor.cursorY + 2, spaces .. "end")
+            table.insert(Editor.lines, Editor.cursorY + 1, indent .. "    ")
+            table.insert(Editor.lines, Editor.cursorY + 2, indent .. "end")
             Editor.cursorY = Editor.cursorY + 1
-            Editor.cursorX = #spaces + 5
+            Editor.cursorX = #indent + 5
         else
             Editor.lines[Editor.cursorY] = before
-            table.insert(Editor.lines, Editor.cursorY + 1, spaces .. after)
+            table.insert(Editor.lines, Editor.cursorY + 1, indent .. after)
             Editor.cursorY = Editor.cursorY + 1
-            Editor.cursorX = #spaces + 1
+            Editor.cursorX = #indent + 1
         end
     end
 
-    Editor.updateAutocomplete()
+    killSuggest()
+    if key == "left" or key == "right" or key == "up" or key == "down" then
+        killSuggest()
+    end
 end
 
 function love.mousepressed(x, y, button)
-    local winW = love.graphics.getWidth()
-    local winH = love.graphics.getHeight()
-    local remainingWidth = winW - Editor.sidebarWidth
+    killSuggest()
     
-    -- sidebar tab clicks
+    local w = love.graphics.getWidth()
+    local h = love.graphics.getHeight()
+    local rem = w - Editor.sidebarWidth
+    
     if x <= Editor.sidebarWidth then
-        local tabIndex = math.floor(y / (winH / 3)) + 1
-        if tabIndex == 1 then 
-            Editor.currentTab = "code" 
-        elseif tabIndex == 2 then 
-            Editor.currentTab = "console" 
-        elseif tabIndex == 3 then 
+        local tab = math.floor(y / (h / 3)) + 1
+        if tab == 1 then Editor.currentTab = "code"
+        elseif tab == 2 then Editor.currentTab = "console"
+        elseif tab == 3 then
             Editor.currentTab = "game"
-            Editor.runSandbox() 
+            Editor.runSandbox()
         end
         return
     end
     
-    -- toolbar area
     if y <= Editor.tabHeight and x > Editor.sidebarWidth then
-        if Editor.suggestActive and #Editor.suggestions > 0 then 
-            Editor.suggestActive = false 
-        end
+        local tabArea = rem * 0.65
         
-        local tabAreaWidth = remainingWidth * 0.65
-        
-        -- tab clicks
-        if x <= Editor.sidebarWidth + tabAreaWidth then
-            local tabWidth = tabAreaWidth / 3
-            local clickedTab = math.floor((x - Editor.sidebarWidth) / tabWidth) + 1
+        if x <= Editor.sidebarWidth + tabArea then
+            local tw = tabArea / 3
+            local tab = math.floor((x - Editor.sidebarWidth) / tw) + 1
             
-            if clickedTab == 1 then 
-                Editor.currentTab = "code" 
-            elseif clickedTab == 2 then 
-                Editor.currentTab = "console" 
-            elseif clickedTab == 3 then 
+            if tab == 1 then Editor.currentTab = "code"
+            elseif tab == 2 then Editor.currentTab = "console"
+            elseif tab == 3 then
                 Editor.currentTab = "game"
-                Editor.runSandbox() 
+                Editor.runSandbox()
             end
             return
         else
-            -- tool buttons (undo, redo, export, import)
-            local rightOffset = x - (Editor.sidebarWidth + tabAreaWidth)
-            local toolWidth = (remainingWidth * 0.35) / 4
-            local actionIndex = math.floor(rightOffset / toolWidth) + 1
+            local off = x - (Editor.sidebarWidth + tabArea)
+            local tw = (rem * 0.35) / 4
+            local act = math.floor(off / tw) + 1
             
-            if actionIndex == 1 then 
-                Editor.undo() 
-            elseif actionIndex == 2 then 
-                Editor.redo() 
-            elseif actionIndex == 3 then 
-                Editor.exportCode() 
-            elseif actionIndex == 4 then 
-                Editor.importCode() 
+            if act == 1 then Editor.undo()
+            elseif act == 2 then Editor.redo()
+            elseif act == 3 then Editor.exportCode()
+            elseif act == 4 then Editor.importCode()
             end
             return
         end
@@ -651,7 +590,6 @@ function love.mousepressed(x, y, button)
     Editor.lastMouseX = x
     Editor.lastMouseY = y
     
-    -- handle code editor clicks
     if Editor.currentTab == "code" then
         local clickLine = math.floor((y - Editor.tabHeight - Editor.scrollY) / Editor.lineHeight) + 1
         
@@ -659,60 +597,53 @@ function love.mousepressed(x, y, button)
             love.keyboard.setTextInput(true)
             Editor.cursorY = clickLine
             
-            -- find cursor position from x coordinate
             local localX = x - Editor.sidebarWidth - 45 - Editor.scrollX
-            local targetIndex = 1
-            local bestDistance = math.abs(localX)
-            local currentLineStr = Editor.lines[Editor.cursorY] or ""
+            local target = 1
+            local dist = math.abs(localX)
+            local str = Editor.lines[Editor.cursorY] or ""
             
-            for charIndex = 1, #currentLineStr do
-                local substringWidth = Editor.font:getWidth(currentLineStr:sub(1, charIndex))
-                local distance = math.abs(localX - substringWidth)
+            for idx = 1, #str do
+                local w = Editor.font:getWidth(str:sub(1, idx))
+                local d = math.abs(localX - w)
                 
-                if distance < bestDistance then 
-                    bestDistance = distance
-                    targetIndex = charIndex + 1 
+                if d < dist then 
+                    dist = d
+                    target = idx + 1 
                 end
             end
             
-            Editor.cursorX = targetIndex
+            Editor.cursorX = target
         end
     end
 end
 
 function love.mousemoved(x, y, dx, dy)
-    if not Editor.isDragging then 
-        return 
-    end
+    if not Editor.isDragging then return end
     
-    local winW = love.graphics.getWidth()
-    local winH = love.graphics.getHeight()
-    local remainingWidth = winW - Editor.sidebarWidth
-    local remainingHeight = winH - Editor.tabHeight
-    local totalContentHeight = #Editor.lines * Editor.lineHeight
+    local w = love.graphics.getWidth()
+    local h = love.graphics.getHeight()
+    local rem = w - Editor.sidebarWidth
+    local cH = h - Editor.tabHeight
+    local tH = #Editor.lines * Editor.lineHeight
     
-    -- vertical scroll
-    if totalContentHeight > remainingHeight then
+    if tH > cH then
         Editor.targetScrollY = math.min(0, math.max(
-            -(totalContentHeight - remainingHeight + 20), 
+            -(tH - cH + 20), 
             Editor.targetScrollY + dy
         ))
     else
         Editor.targetScrollY = 0
     end
     
-    -- horizontal scroll
-    local maxLineWidth = 0
+    local mW = 0
     for _, line in ipairs(Editor.lines) do
-        local width = Editor.font:getWidth(line) + 60
-        if width > maxLineWidth then 
-            maxLineWidth = width 
-        end
+        local w = Editor.font:getWidth(line) + 60
+        if w > mW then mW = w end
     end
     
-    if maxLineWidth > remainingWidth then
+    if mW > rem then
         Editor.targetScrollX = math.min(0, math.max(
-            -(maxLineWidth - remainingWidth), 
+            -(mW - rem), 
             Editor.targetScrollX + dx
         ))
     else
@@ -730,17 +661,16 @@ function love.resize()
 end
 
 function love.draw()
-    local winW = love.graphics.getWidth()
-    local winH = love.graphics.getHeight()
-    local remainingWidth = winW - Editor.sidebarWidth
-    local theme = Editor.theme
+    local w = love.graphics.getWidth()
+    local h = love.graphics.getHeight()
+    local rem = w - Editor.sidebarWidth
+    local t = Editor.theme
     
-    -- main background
-    love.graphics.setColor(theme.bg)
-    love.graphics.rectangle("fill", Editor.sidebarWidth, Editor.tabHeight, remainingWidth, winH - Editor.tabHeight)
+    love.graphics.setColor(t.bg)
+    love.graphics.rectangle("fill", Editor.sidebarWidth, Editor.tabHeight, rem, h - Editor.tabHeight)
     
     love.graphics.push("all")
-    love.graphics.intersectScissor(Editor.sidebarWidth, Editor.tabHeight, remainingWidth, winH - Editor.tabHeight)
+    love.graphics.intersectScissor(Editor.sidebarWidth, Editor.tabHeight, rem, h - Editor.tabHeight)
     
     if Editor.currentTab == "code" then
         love.graphics.translate(Editor.sidebarWidth, Editor.tabHeight + Editor.scrollY)
@@ -748,58 +678,50 @@ function love.draw()
         for i, line in ipairs(Editor.lines) do
             local y = (i - 1) * Editor.lineHeight
             
-            -- highlight current line
             if i == Editor.cursorY then
                 love.graphics.setColor(0.16, 0.16, 0.16, 0.8)
-                love.graphics.rectangle("fill", 0, y, remainingWidth, Editor.lineHeight)
+                love.graphics.rectangle("fill", 0, y, rem, Editor.lineHeight)
             end
             
-            -- line numbers
-            love.graphics.setColor(theme.gutterText)
+            love.graphics.setColor(t.gutterText)
             love.graphics.printf(tostring(i), 5, y + 2, 25, "right")
             
             love.graphics.push()
             love.graphics.translate(Editor.scrollX, 0)
             
-            -- draw the code with syntax highlighting
-            local status, err = pcall(function() 
-                parseAndDrawLine(line, 45, y + 2) 
-            end)
+            local ok = pcall(function() drawLine(line, 45, y + 2) end)
             
-            if not status then
-                -- fallback if syntax highlighting breaks
-                love.graphics.setColor(theme.plainColor)
+            if not ok then
+                love.graphics.setColor(t.plainColor)
                 love.graphics.print(line, 45, y + 2)
             end
             
-            -- draw cursor
             if i == Editor.cursorY and Editor.cursorTimer < 0.5 then
-                love.graphics.setColor(theme.cursor)
-                local cursorX = 45 + Editor.font:getWidth(line:sub(1, Editor.cursorX - 1))
-                love.graphics.rectangle("fill", cursorX, y + 2, 2, Editor.lineHeight - 4)
+                love.graphics.setColor(t.cursor)
+                local cx = 45 + Editor.font:getWidth(line:sub(1, Editor.cursorX - 1))
+                love.graphics.rectangle("fill", cx, y + 2, 2, Editor.lineHeight - 4)
             end
             
             love.graphics.pop()
         end
         
-        -- autocomplete dropdown
         if Editor.suggestActive and #Editor.suggestions > 0 then
-            local currentLine = Editor.lines[Editor.cursorY] or ""
-            local suggestionX = 45 + Editor.scrollX + Editor.font:getWidth(currentLine:sub(1, Editor.cursorX - 1))
-            local suggestionY = Editor.cursorY * Editor.lineHeight
-            local suggestionWidth = 140
+            local line = Editor.lines[Editor.cursorY] or ""
+            local sx = 45 + Editor.scrollX + Editor.font:getWidth(line:sub(1, Editor.cursorX - 1))
+            local sy = Editor.cursorY * Editor.lineHeight
+            local sw = 140
             
             love.graphics.setColor(0.18, 0.18, 0.22, 0.95)
-            love.graphics.rectangle("fill", suggestionX, suggestionY, suggestionWidth, #Editor.suggestions * Editor.lineHeight)
+            love.graphics.rectangle("fill", sx, sy, sw, #Editor.suggestions * Editor.lineHeight)
             
-            for idx, suggestion in ipairs(Editor.suggestions) do
-                if idx == Editor.suggestIndex then
+            for i, s in ipairs(Editor.suggestions) do
+                if i == Editor.suggestIndex then
                     love.graphics.setColor(0.2, 0.45, 0.8)
-                    love.graphics.rectangle("fill", suggestionX + 2, suggestionY + (idx - 1) * Editor.lineHeight + 2, suggestionWidth - 4, Editor.lineHeight - 4)
+                    love.graphics.rectangle("fill", sx + 2, sy + (i - 1) * Editor.lineHeight + 2, sw - 4, Editor.lineHeight - 4)
                 end
                 
                 love.graphics.setColor(0.9, 0.9, 0.9)
-                love.graphics.print(suggestion, suggestionX + 6, suggestionY + (idx - 1) * Editor.lineHeight + 2)
+                love.graphics.print(s, sx + 6, sy + (i - 1) * Editor.lineHeight + 2)
             end
         end
     elseif Editor.currentTab == "console" then
@@ -807,7 +729,7 @@ function love.draw()
         
         local y = 10
         for _, log in ipairs(Editor.consoleLogs) do
-            love.graphics.setColor(log.isError and theme.errorText or theme.plainColor)
+            love.graphics.setColor(log.isError and t.errorText or t.plainColor)
             love.graphics.print(log.text, 15, y)
             y = y + Editor.lineHeight
         end
@@ -819,63 +741,60 @@ function love.draw()
     
     love.graphics.pop()
     
-    -- draw toolbar
-    love.graphics.setColor(theme.toolbarBg)
-    love.graphics.rectangle("fill", Editor.sidebarWidth, 0, remainingWidth, Editor.tabHeight)
+    love.graphics.setColor(t.toolbarBg)
+    love.graphics.rectangle("fill", Editor.sidebarWidth, 0, rem, Editor.tabHeight)
     
-    local tabAreaWidth = remainingWidth * 0.65
-    local tabWidth = tabAreaWidth / 3
+    local tabArea = rem * 0.65
+    local tw = tabArea / 3
     local tabs = {
         {id = "code", label = "main.lua"},
         {id = "console", label = "debug.log"},
         {id = "game", label = "play.exe"}
     }
     
-    for i, tabInfo in ipairs(tabs) do
-        local tx = Editor.sidebarWidth + (i - 1) * tabWidth
-        local isActive = Editor.currentTab == tabInfo.id
-        local tabColor = isActive and theme.tabActive or theme.tabBg
+    for i, tab in ipairs(tabs) do
+        local tx = Editor.sidebarWidth + (i - 1) * tw
+        local act = Editor.currentTab == tab.id
+        local col = act and t.tabActive or t.tabBg
         
-        love.graphics.setColor(tabColor, tabColor, tabColor)
-        love.graphics.rectangle("fill", tx, 0, tabWidth - 1, Editor.tabHeight)
+        love.graphics.setColor(col, col, col)
+        love.graphics.rectangle("fill", tx, 0, tw - 1, Editor.tabHeight)
         
-        if isActive then
-            love.graphics.setColor(theme.accent, theme.accent, theme.accent)
-            love.graphics.rectangle("fill", tx, 0, tabWidth - 1, 2)
+        if act then
+            love.graphics.setColor(t.accent, t.accent, t.accent)
+            love.graphics.rectangle("fill", tx, 0, tw - 1, 2)
         end
         
-        love.graphics.setColor(theme.plainColor, theme.plainColor, theme.plainColor)
-        love.graphics.printf(tabInfo.label, tx, 8, tabWidth, "center")
+        love.graphics.setColor(t.plainColor, t.plainColor, t.plainColor)
+        love.graphics.printf(tab.label, tx, 8, tw, "center")
     end
     
-    -- tool buttons (Un/Re/Ex/Im)
-    local toolsStartX = Editor.sidebarWidth + tabAreaWidth
-    local toolWidth = (remainingWidth * 0.35) / 4
-    local toolLabels = {"Un", "Re", "Ex", "Im"}
+    local toolStart = Editor.sidebarWidth + tabArea
+    local toolW = (rem * 0.35) / 4
+    local tools = {"Un", "Re", "Ex", "Im"}
     
-    for i, label in ipairs(toolLabels) do
-        love.graphics.setColor(theme.plainColor)
-        love.graphics.printf(label, toolsStartX + (i - 1) * toolWidth, 8, toolWidth, "center")
+    for i, label in ipairs(tools) do
+        love.graphics.setColor(t.plainColor)
+        love.graphics.printf(label, toolStart + (i - 1) * toolW, 8, toolW, "center")
     end
     
-    -- draw sidebar
-    love.graphics.setColor(theme.sidebarBg)
-    love.graphics.rectangle("fill", 0, 0, Editor.sidebarWidth, winH)
+    love.graphics.setColor(t.sidebarBg)
+    love.graphics.rectangle("fill", 0, 0, Editor.sidebarWidth, h)
     
-    local sidebarHeight = winH / 3
-    local sidebarLabels = {
+    local sbH = h / 3
+    local sb = {
         {id = "code", label = "[|]"},
         {id = "console", label = "[>]"},
         {id = "game", label = "|>"}
     }
     
-    for i, sidebarInfo in ipairs(sidebarLabels) do
-        if Editor.currentTab == sidebarInfo.id then
-            love.graphics.setColor(theme.accent)
-            love.graphics.rectangle("fill", 0, (i - 1) * sidebarHeight, 2, sidebarHeight)
+    for i, item in ipairs(sb) do
+        if Editor.currentTab == item.id then
+            love.graphics.setColor(t.accent)
+            love.graphics.rectangle("fill", 0, (i - 1) * sbH, 2, sbH)
         end
         
-        love.graphics.setColor(theme.plainColor)
-        love.graphics.printf(sidebarInfo.label, 0, (i - 1) * sidebarHeight + (sidebarHeight / 2) - 8, Editor.sidebarWidth, "center")
+        love.graphics.setColor(t.plainColor)
+        love.graphics.printf(item.label, 0, (i - 1) * sbH + (sbH / 2) - 8, Editor.sidebarWidth, "center")
     end
 end
